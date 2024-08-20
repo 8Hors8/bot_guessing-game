@@ -1,11 +1,14 @@
 """
-Модуль для подключение к бд
+Модуль для подключения к бд
 """
 
-import re
+import logging
 import psycopg2
 from psycopg2 import sql
-from config import DB_PATH
+from config import DB_PATH, config_logging
+
+config_logging()
+logger = logging.getLogger('database')
 
 
 class Database:
@@ -30,9 +33,9 @@ class Database:
             self.conn = psycopg2.connect(dbname=dbname, user=user,
                                          password=password, host=host, port=port)
             self.cur = self.conn.cursor()
-            print(f"Соединение с {dbname} успешно")
+            logger.info(f"Соединение с {dbname} успешно")
         except psycopg2.OperationalError:
-            print(f"Ошибка подключения к {dbname}")
+            logger.error(f"Ошибка подключения к {dbname}")
 
     def __del__(self):
         """Закрытие соединения и курсора при уничтожении объекта."""
@@ -54,9 +57,9 @@ class Database:
             query = sql.SQL(f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_str})")
             self.cur.execute(query)
             self.conn.commit()
-            print(f"Таблица {table_name} успешно создана")
+            logger.info(f"Таблица {table_name} успешно создана")
         except psycopg2.DatabaseError as e:
-            print(f"Ошибка при создании таблицы {table_name}: {e}")
+            logger.error(f"Ошибка при создании таблицы {table_name}: {e}")
 
     def drop_table(self, table_name: str):
         """
@@ -68,9 +71,9 @@ class Database:
             query = sql.SQL(f"DROP TABLE IF EXISTS {table_name}")
             self.cur.execute(query)
             self.conn.commit()
-            print(f'Таблица успешно удалена {table_name}')
+            logger.info(f'Таблица успешно удалена {table_name}')
         except psycopg2.DatabaseError as e:
-            print(f"Ошибка при удалении таблицы {table_name}: {e}")
+            logger.error(f"Ошибка при удалении таблицы {table_name}: {e}")
 
     def insert_data(self, table_name: str, data: dict):
         """
@@ -93,7 +96,7 @@ class Database:
             self.conn.commit()
             return inserted_id
         except psycopg2.DatabaseError as e:
-            print(f"Ошибка при вставке данных в таблицу {table_name}: {e}")
+            logger.error(f"Ошибка при вставке данных в таблицу {table_name}: {e}")
             return None
 
     def select_data(self, table_name, columns: str = '*',
@@ -116,7 +119,7 @@ class Database:
             rows = self.cur.fetchall()
             return rows
         except psycopg2.DatabaseError as e:
-            print(f"Ошибка при выполнении SELECT из таблицы {table_name}: {e}")
+            logger.error(f"Ошибка при выполнении SELECT из таблицы {table_name}: {e}")
             return []
 
     def update_data(self, table_name: str, data: dict, condition: str, values: tuple = None):
@@ -149,13 +152,12 @@ class Database:
             if values:
                 query_values.extend(values)
 
-
             self.cur.execute(query, query_values)
             self.conn.commit()
-            print(f'Обновление в таблице {table_name} прошло успешно')
+            logger.info(f'Обновление в таблице {table_name} прошло успешно')
             return True
         except psycopg2.DatabaseError as e:
-            print(f"Ошибка при обновлении данных в таблице {table_name}: {e}")
+            logger.error(f"Ошибка при обновлении данных в таблице {table_name}: {e}")
             return False
 
 
