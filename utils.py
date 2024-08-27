@@ -141,11 +141,19 @@ class GameUtils:
 
         else:
             word_dicr = self.read_words_bd(id_user)
+        try:
+            word = list(word_dicr.keys())[0]
+            translation = word_dicr[word]
+            text_buttons = list(word_dicr.values())[1:]
+            return word, translation, text_buttons
+        except Exception as e:
+            logger.error(f'Ошибка при генерации слов: {e}')
 
-        word = list(word_dicr.keys())[0]
-        translation = word_dicr[word]
-        text_buttons = list(word_dicr.values())[1:]
-        return word, translation, text_buttons
+            word_dicr = self.get_fallback_words()
+            word = list(word_dicr.keys())[0]
+            translation = word_dicr[word]
+            text_buttons = list(word_dicr.values())[1:]
+            return word, translation, text_buttons
 
     def read_words_csv(self, user_id: int, quantity: int = 4):
         """
@@ -189,7 +197,7 @@ class GameUtils:
             return words_dict
 
         except Exception as e:
-            logger.error(f'ошибка {e}')
+            logger.error(f'ошибка при чтении CSV файла {e}')
             words_dict.update(self.read_words_bd(user_id))
             return words_dict
 
@@ -286,6 +294,50 @@ class GameUtils:
         else:
             result = f'{idx}.'
         return result
+
+    def get_fallback_words(self):
+        """
+        Возвращает резервный набор слов из 20 русско-английских пар.
+
+        Эта функция выбирает 4 случайных слова из этого набора, проверяет их наличие
+        в базе данных,
+        и, если слово отсутствует, сохраняет его в базу данных.
+
+        :return: dict Словарь, содержащий русские слова в качестве ключей и их английские
+                 переводы в качестве значений.
+        """
+        fallback_words = {
+            'кот': 'cat',
+            'собака': 'dog',
+            'молоко': 'milk',
+            'хлеб': 'bread',
+            'яблоко': 'apple',
+            'машина': 'car',
+            'дом': 'house',
+            'окно': 'window',
+            'дерево': 'tree',
+            'книга': 'book',
+            'ручка': 'pen',
+            'стол': 'table',
+            'стул': 'chair',
+            'часы': 'clock',
+            'зонт': 'umbrella',
+            'солнце': 'sun',
+            'луна': 'moon',
+            'звезда': 'star',
+            'рыба': 'fish',
+            'птица': 'bird'
+        }
+        selected_words = random.sample(list(fallback_words.items()), 4)
+        words_dict = {}
+
+        for word, translation in selected_words:
+            check_word_bd = self.db.search_word(word)
+            if check_word_bd is None:
+                self.db.save_word(word, translation)
+            words_dict[word] = translation
+
+        return words_dict
 
 
 class DatabaseUtils(Database):
