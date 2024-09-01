@@ -6,7 +6,7 @@ import random
 
 from keyboard import ReplyKeyboard
 from telebot import types
-from btn_text import BTN_STAR_GEME, VIEW_RATING
+from btn_text import BTN_STAR_GEME, VIEW_RATING, ADD_WORD, DEL_WORD
 
 
 def start_button():
@@ -37,6 +37,8 @@ def translation_buttons(text_buttons: list):
     reply_keyboard = ReplyKeyboard(row_width=2)
     random.shuffle(text_buttons)
     buttons = [types.KeyboardButton(word) for word in text_buttons]
+    buttons.append(types.KeyboardButton(ADD_WORD))
+    buttons.append(types.KeyboardButton(DEL_WORD))
     buttons.append(types.KeyboardButton(VIEW_RATING))
     reply_keyboard.add_button(*buttons)
     return reply_keyboard.get_markup()

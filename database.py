@@ -16,16 +16,16 @@ class Database:
     Класс для управления подключением и операциями с базой данных.
     """
 
-    def __init__(self, dbname=DB_PATH['dbname'], user=DB_PATH['user'], password=DB_PATH['password'], host='localhost',
-                 port=5432):
+    def __init__(self, dbname=DB_PATH['dbname'], user=DB_PATH['user'], password=DB_PATH['password'],
+                 host='localhost', port=5432):
         """
-        Инициализация соединения с базой данных.
+            Инициализация соединения с базой данных.
 
-        :param dbname: Имя базы данных.
-        :param user: Имя пользователя базы данных.
-        :param password: Пароль пользователя базы данных.
-        :param host: Хост базы данных (по умолчанию 'localhost').
-        :param port: Порт базы данных (по умолчанию 5432).
+            :param dbname: Имя базы данных.
+            :param user: Имя пользователя базы данных.
+            :param password: Пароль пользователя базы данных.
+            :param host: Хост базы данных (по умолчанию 'localhost').
+            :param port: Порт базы данных (по умолчанию 5432).
         """
         self.conn = None
         self.cur = None
@@ -133,6 +133,7 @@ class Database:
         то она будет использована напрямую в SQL-запросе.
         :param condition: Условие WHERE для фильтрации записей, строка SQL.
         :param values: Необязательный параметр. Значения для подстановки в условие WHERE, кортеж.
+
         :return: True, если обновление прошло успешно, иначе False.
         """
         try:

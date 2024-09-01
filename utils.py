@@ -10,7 +10,7 @@ import random
 from database import Database
 from config import config_logging
 from buttons import translation_buttons, start_button
-from btn_text import VIEW_RATING
+from btn_text import VIEW_RATING, ADD_WORD, DEL_WORD
 
 logger = logging.getLogger('utils')
 config_logging()
@@ -110,15 +110,58 @@ class GameUtils:
             self.db.update_points(user_id, 1)
             self.db.update_times_shown(user_id, id_word)
             self.start_game(message)
+
         elif user_answer == VIEW_RATING:
             result = self.display_player_rating(user_id)
             self.bot.send_message(chat_id, result, parse_mode='HTML')
             self.bot.send_message(chat_id, 'Дя продолжения нажмите кнопку',
                                   reply_markup=start_button())
+
+        elif user_answer == ADD_WORD:
+            self.add_new_word(message)
+
+        elif user_answer == DEL_WORD:
+            pass
+
         else:
             self.bot.send_message(chat_id, "Не совсем так. Но не отчаивайтесь! 💔 -3 балла!")
             self.db.update_points(user_id, 3, add=False)
             self.start_game(message)
+
+    def add_new_word(self, message):
+        """
+        Инициирует процесс добавления нового слова для пользователя.
+
+        :param message: Сообщение от пользователя.
+        """
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        self.bot.send_message(chat_id,
+                              'Введите слово и его перевод через запятую (например, "кот, cat"):')
+        self.bot.register_next_step_handler(message, self.save_new_word, user_id)
+
+    def save_new_word(self, message, user_id):
+        """
+        Сохраняет новое слово и его перевод для конкретного пользователя в базе данных.
+
+        :param message: Сообщение от пользователя с новым словом и его переводом.
+        :param user_id: Идентификатор пользователя в Telegram.
+        """
+        chat_id = message.chat.id
+        text = message.text.split(',')
+
+        if len(text) == 2:
+            word = text[0].strip()
+            translation = text[1].strip()
+
+            if not self.db.search_user_word(user_id, word):
+                self.db.save_user_word(user_id, word, translation)
+                self.bot.send_message(chat_id, f'Слово "{word}" с переводом "{translation}" было успешно добавлено.')
+
+            else:
+                self.bot.send_message(chat_id, f'Слово "{word}" уже существует в вашей базе данных.')
+        else:
+            self.bot.send_message(chat_id, 'Неверный формат. Попробуйте снова.')
 
     def word_generator(self, message):
         """
@@ -135,24 +178,29 @@ class GameUtils:
                  список неправильных вариантов перевода.
         """
         id_user = message.from_user.id
-        flag = random.randint(0, 1)
+        flag = random.randint(0, 2)
         if flag == 0:
-            word_dicr = self.read_words_csv(id_user)
+            word_dict = self.read_words_csv(id_user)
+
+        elif flag == 1:
+            word_dict = None
 
         else:
-            word_dicr = self.read_words_bd(id_user)
+            word_dict = self.read_words_bd(id_user)
+
         try:
-            word = list(word_dicr.keys())[0]
-            translation = word_dicr[word]
-            text_buttons = list(word_dicr.values())[1:]
+            word = list(word_dict.keys())[0]
+            translation = word_dict[word]
+            text_buttons = list(word_dict.values())[1:]
             return word, translation, text_buttons
+
         except Exception as e:
             logger.error(f'Ошибка при генерации слов: {e}')
 
-            word_dicr = self.get_fallback_words()
-            word = list(word_dicr.keys())[0]
-            translation = word_dicr[word]
-            text_buttons = list(word_dicr.values())[1:]
+            word_dict = self.get_fallback_words()
+            word = list(word_dict.keys())[0]
+            translation = word_dict[word]
+            text_buttons = list(word_dict.values())[1:]
             return word, translation, text_buttons
 
     def read_words_csv(self, user_id: int, quantity: int = 4):
@@ -379,9 +427,18 @@ class DatabaseUtils(Database):
             ('times_shown', 'INTEGER DEFAULT 0')
         ]
 
+        table_name_words_added_user = 'words_added_user'
+        columns_words_added_user = [
+            ('id', 'SERIAL PRIMARY KEY'),
+            ('user_id', 'BIGINT'),
+            ('word', 'TEXT'),
+            ('translation', 'TEXT')
+        ]
+
         self.create_table(table_name_user, columns_user)
         self.create_table(table_name_word, columns_word)
         self.create_table(table_name_user_word, columns_user_word)
+        self.create_table(table_name_words_added_user, columns_words_added_user)
 
     def save_user(self, name, tg_user_id):
         """
