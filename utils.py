@@ -9,8 +9,8 @@ import random
 
 from database import Database
 from config import config_logging
-from buttons import translation_buttons, start_button
-from btn_text import VIEW_RATING, ADD_WORD, DEL_WORD
+from buttons import translation_buttons, start_button, universal_buttons
+from btn_text import BTN_VIEW_RATING, BTN_ADD_WORD, BTN_DEL_WORD, BTN_Back
 
 config_logging()
 logger = logging.getLogger('utils')
@@ -88,7 +88,7 @@ class GameUtils:
         self.bot.register_next_step_handler_by_chat_id(chat_id, self.check_answer,
                                                        id_word_db, correct_translation)
 
-    def check_answer(self, message, id_word, correct_translation):
+    def check_answer(self, message, id_word: int, correct_translation: str):
         """
             Проверяет правильность ответа пользователя и обновляет его очки.
 
@@ -110,17 +110,17 @@ class GameUtils:
             self.db.update_times_shown(user_id, id_word)
             self.start_game(message)
 
-        elif user_answer == VIEW_RATING:
+        elif user_answer == BTN_VIEW_RATING:
             result = self.display_player_rating(user_id)
             self.bot.send_message(chat_id, result, parse_mode='HTML')
             self.bot.send_message(chat_id, 'Дя продолжения нажмите кнопку',
                                   reply_markup=start_button())
 
-        elif user_answer == ADD_WORD:
+        elif user_answer == BTN_ADD_WORD:
             self.add_new_word(message)
 
-        elif user_answer == DEL_WORD:
-            pass
+        elif user_answer == BTN_DEL_WORD:
+            self.dell_word_user(message)
 
         else:
             self.bot.send_message(chat_id, "Не совсем так. Но не отчаивайтесь! 💔 -3 балла!")
@@ -131,41 +131,112 @@ class GameUtils:
         """
         Инициирует процесс добавления нового слова для пользователя.
 
+        Функция отправляет пользователю сообщение с инструкцией по добавлению
+        нового слова и его перевода.
+        Пользователь должен ввести слово на русском и его перевод через запятую.
+        Также отображается кнопка "Назад" для возврата.
+
         :param message: Сообщение от пользователя.
         """
         chat_id = message.chat.id
         user_id = message.from_user.id
         self.bot.send_message(chat_id,
-                              'Введите слово и его перевод через запятую (например, "кот, cat"):')
+                              'Введите слово и его перевод через запятую (например, "кот, cat"):',
+                              reply_markup=universal_buttons([BTN_Back]))
         self.bot.register_next_step_handler(message, self._save_new_word, user_id)
 
     def _save_new_word(self, message, user_id: int):
         """
-            Сохраняет новое слово и его перевод для конкретного пользователя в базе данных.
+        Сохраняет новое слово и его перевод для конкретного пользователя в базе данных.
 
-            :param message: Сообщение от пользователя с новым словом и его переводом.
-            :param user_id: Идентификатор пользователя в Telegram.
+        Функция проверяет правильность ввода (два значения через запятую), сохраняет слово
+        с переводом в базу данных и отображает пользователю список всех добавленных слов
+        с их статусами "изучается" или "изучено").
+        Также предоставляет кнопку для продолжения игры или возврата в главное меню.
+
+        :param message: Сообщение от пользователя с новым словом и его переводом.
+        :param user_id: Идентификатор пользователя в Telegram.
         """
         chat_id = message.chat.id
         text = message.text.lower().split(',')
 
-        if len(text) == 2:
-            word = text[0].strip()
-            translation = text[1].strip()
+        if text[0].strip() == BTN_Back.lower():
+            self.start_game(message)
 
-            if not self.db.search_word(word, user_id):
-                self.db.save_word(word, translation, user_id)
-                self.bot.send_message(chat_id,
-                                      f'Слово "{word}" с переводом "{translation}" было успешно добавлено.')
-
-                word_message = self._format_user_words(user_id)
-                self.bot.send_message(chat_id, word_message, reply_markup=start_button())
-
-            else:
-                self.bot.send_message(chat_id,
-                                      f'Слово "{word}" уже существует в вашей базе данных.')
         else:
-            self.bot.send_message(chat_id, 'Неверный формат. Попробуйте снова.')
+            if len(text) == 2:
+                word = text[0].strip()
+                translation = text[1].strip()
+
+                if not self.db.search_word(word, user_id):
+                    self.db.save_word(word, translation, user_id)
+                    self.bot.send_message(chat_id,
+                                          f'Слово "{word}" с переводом "{translation}" '
+                                          f'было успешно добавлено.'
+                                          )
+
+                    word_message = self._format_user_words(user_id)
+                    self.bot.send_message(chat_id, word_message + '\nДя продолжения нажмите кнопку',
+                                          reply_markup=start_button(), parse_mode='HTML')
+
+                else:
+                    self.bot.send_message(chat_id,
+                                          f'Слово "{word}" уже существует в вашей базе данных.')
+            else:
+                self.bot.send_message(chat_id, 'Неверный формат. Попробуйте снова.')
+
+    def dell_word_user(self, message):
+        """
+        Запрашивает у пользователя слово для удаления и отображает список добавленных слов.
+
+        Функция запрашивает у пользователя слово, которое нужно удалить из базы данных,
+        и выводит ему список ранее добавленных слов для удобства выбора.
+        Также предоставляется кнопка "Назад", чтобы вернуться без удаления слова.
+
+        :param message: Объект сообщения Telegram, используемый для взаимодействия с пользователем.
+        """
+
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        word_message = self._format_user_words(user_id)
+
+        self.bot.send_message(chat_id, word_message + '\nУкажите слово которое нужно удалить',
+                              reply_markup=universal_buttons([BTN_Back]), parse_mode='HTML')
+        self.bot.register_next_step_handler(message, self._delete_user_word, user_id)
+
+    def _delete_user_word(self, message, user_id: int):
+        """
+        Удаляет указанное пользователем слово из базы данных и уведомляет его о результате.
+
+        Функция удаляет слово, введенное пользователем, из базы данных для конкретного пользователя.
+        Если удаление прошло успешно, пользователю отправляется сообщение об успешном удалении.
+        В случае неудачи или если слово не было найдено,
+        отправляется сообщение с соответствующим уведомлением.
+
+        :param message: Объект сообщения Telegram, который содержит введенное пользователем слово.
+        :param user_id: int Идентификатор пользователя в базе данных.
+        """
+        chat_id = message.chat.id
+        text = message.text.lower().strip()
+
+        if text == BTN_Back.lower():
+            self.start_game(message)
+            return
+
+        result = self.db.delete_word(text, user_id)
+
+        if result:
+            self.bot.send_message(chat_id,
+                                  f'Слово <b>{text.capitalize()}</b> успешно удалено из базы данных.\n'
+                                  'Для продолжения нажмите кнопку.',
+                                  reply_markup=start_button(),
+                                  parse_mode="HTML")
+        else:
+            self.bot.send_message(chat_id,
+                                  f'Слово <b>{text.capitalize()}</b> не удалось удалить из базы данных.\n'
+                                  'Для продолжения нажмите кнопку.',
+                                  reply_markup=start_button(),
+                                  parse_mode="HTML")
 
     def _format_user_words(self, user_id: int) -> str:
         """
@@ -178,13 +249,13 @@ class GameUtils:
         word_list = []
 
         for word, times_shown in word_dict.items():
-            status = "изучается" if times_shown is None or times_shown < 4 else "изучено"
+            status = "<b>изучается</b>" if times_shown is None or times_shown < 4 else "изучено"
             word_list.append(f"{word} - {status}")
 
         word_message = "Слова, которые вы добавили:\n" + "\n".join(word_list)
         return word_message
 
-    def word_generator(self, message):
+    def word_generator(self, message) -> tuple[str, str, list[str], int]:
         """
         Генерирует слова для перевода и соответствующие варианты перевода.
 
@@ -195,8 +266,8 @@ class GameUtils:
         :param message: Объект сообщения от пользователя в Telegram, используемый
                         для получения ID пользователя.
 
-        :return: Кортеж, содержащий выбранное слово, его правильный перевод, id из БД
-                    и список неправильных вариантов перевода.
+        :return: Кортеж, содержащий выбранное слово (str), его правильный перевод (str),
+             список неправильных вариантов перевода (list[str]) и id слова из БД (int).
         """
         id_user = message.from_user.id
         flag = random.randint(0, 2)
@@ -229,7 +300,7 @@ class GameUtils:
             text_buttons = list(word_dict.values())[1:]
             return word, translation, text_buttons, id_word_db
 
-    def read_words_csv(self, user_id: int, quantity: int = 4):
+    def read_words_csv(self, user_id: int, quantity: int = 4) -> dict:
         """
             Читает указанное количество уникальных слов из CSV-файла,
             проверяет их на дубликаты в базе данных, сохраняет найденные слова вместе
@@ -320,7 +391,7 @@ class GameUtils:
             result.update(bd_word)
         return result
 
-    def display_player_rating(self, telegram_user_id):
+    def display_player_rating(self, telegram_user_id) -> str:
         """
             Отображает рейтинг игроков с учетом позиции запрашивающего пользователя.
 
@@ -360,7 +431,7 @@ class GameUtils:
             msg += 'Пользователь не найден в рейтинге.'
         return msg
 
-    def _format_rating_entry(self, user_position, idx, user):
+    def _format_rating_entry(self, user_position: int, idx: int, user: dict) -> str:
         """
             Форматирует запись рейтинга с учетом позиции пользователя.
 
@@ -376,7 +447,7 @@ class GameUtils:
             msg = f'{self._get_medal(idx)} {user["name"]} - "{user["points"]} очков"\n'
         return msg
 
-    def _get_medal(self, idx):
+    def _get_medal(self, idx: int) -> str:
         """
             Возвращает соответствующий медаль-эмодзи для первых трех мест или номер позиции.
 
@@ -487,7 +558,7 @@ class DatabaseUtils(Database):
         self.create_table(table_name_word, columns_word)
         self.create_table(table_name_user_word, columns_user_word)
 
-    def save_user(self, name, tg_user_id):
+    def save_user(self, name: str, tg_user_id: int):
         """
         Сохраняет информацию о пользователе в базе данных.
 
@@ -504,7 +575,7 @@ class DatabaseUtils(Database):
         }
         self.insert_data(table_name=table_name, data=data)
 
-    def search_user(self, tg_user_id):
+    def search_user(self, tg_user_id: int) -> dict:
         """
         Ищет информацию о пользователе в базе данных по его Telegram ID.
 
@@ -533,7 +604,7 @@ class DatabaseUtils(Database):
             user_info = None
         return user_info
 
-    def search_word(self, word: str, user_id: int = None):
+    def search_word(self, word: str, user_id: int = None) -> int | None:
         """
         Ищет слово в базе данных.
 
@@ -644,7 +715,7 @@ class DatabaseUtils(Database):
             words_dict[words[0]] = [words[1], words[2]]
         return words_dict
 
-    def update_points(self, user_id, points: int, add=True):
+    def update_points(self, user_id: int, points: int, add=True):
         """
             Обновляет количество очков пользователя.
 
@@ -661,7 +732,7 @@ class DatabaseUtils(Database):
         condition = f'users.telegram_user_id = {user_id}'
         self.update_data(table_name=table_name, data=data, condition=condition)
 
-    def update_times_shown(self, telegram_user_id, word_id: int):
+    def update_times_shown(self, telegram_user_id: int, word_id: int):
         """
         Обновляет количество показов слова для пользователя.
 
@@ -698,7 +769,7 @@ class DatabaseUtils(Database):
             }
             self.insert_data(table_name='users_word', data=data)
 
-    def get_player_ratings(self):
+    def get_player_ratings(self) -> list:
         """
             Получает рейтинг игроков на основе их очков.
 
@@ -743,6 +814,27 @@ class DatabaseUtils(Database):
             words[word[0]] = word[1]
 
         return words
+
+    def delete_word(self, word: str, user_id: int) -> bool:
+        """
+        Удаляет указанное слово для конкретного пользователя из базы данных.
+
+        Эта функция удаляет слово на русском языке из таблицы `word`, если оно
+        принадлежит указанному пользователю. Если удаление прошло успешно,
+        функция возвращает `True`, в противном случае — `False`.
+
+        :param word: str Слово на русском языке, которое нужно удалить.
+        :param user_id: int Идентификатор пользователя, которому принадлежит слово.
+
+        :return: bool Возвращает `True`, если слово успешно удалено, и `False` в противном случае.
+        """
+        table_name = 'word'
+        condition = 'russian_words = %s AND user_id = %s'
+        values = (word, user_id)
+
+        result = self.delete_data(table_name=table_name, condition=condition, values=values)
+
+        return result
 
 
 if __name__ == '__main__':
