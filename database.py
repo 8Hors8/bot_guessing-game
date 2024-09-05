@@ -162,6 +162,26 @@ class Database:
             logger.error(f"Ошибка при обновлении данных в таблице {table_name}: {e}")
             return False
 
+    def delete_data(self, table_name: str, condition: str = None, values: tuple = None) -> bool:
+        """
+        Выполнение DELETE-запроса.
+
+        :param table_name: Имя таблицы, из которой нужно удалить данные.
+        :param condition: Условие WHERE для фильтрации данных, строка SQL.
+        :param values: Значения для подстановки в условие WHERE, кортеж.
+        :return: True, если удаление прошло успешно, иначе False.
+        """
+        try:
+            query = sql.SQL(f"DELETE FROM {table_name}")
+            if condition:
+                query += sql.SQL(f" WHERE {condition}")
+            self.cur.execute(query, values)
+            self.conn.commit()
+            return True
+        except psycopg2.DatabaseError as e:
+            logger.error(f"Ошибка при удалении данных из таблицы {table_name}: {e}")
+            self.conn.rollback()
+            return False
 
 if __name__ == '__main__':
     r = Database()
