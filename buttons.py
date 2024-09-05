@@ -6,10 +6,10 @@ import random
 
 from keyboard import ReplyKeyboard
 from telebot import types
-from btn_text import BTN_STAR_GEME, VIEW_RATING, ADD_WORD, DEL_WORD
+from btn_text import BTN_STAR_GEME, BTN_VIEW_RATING, BTN_ADD_WORD, BTN_DEL_WORD
 
 
-def start_button():
+def start_button() -> object:
     """
         Функция для создания стартовой клавиатуры с кнопками.
 
@@ -22,7 +22,7 @@ def start_button():
     return reply_keyboard.get_markup()
 
 
-def translation_buttons(text_buttons: list):
+def translation_buttons(text_buttons: list) -> object:
     """
         Создает клавиатуру для выбора перевода слова.
 
@@ -37,8 +37,25 @@ def translation_buttons(text_buttons: list):
     reply_keyboard = ReplyKeyboard(row_width=2)
     random.shuffle(text_buttons)
     buttons = [types.KeyboardButton(word) for word in text_buttons]
-    buttons.append(types.KeyboardButton(ADD_WORD))
-    buttons.append(types.KeyboardButton(DEL_WORD))
-    buttons.append(types.KeyboardButton(VIEW_RATING))
+    buttons.append(types.KeyboardButton(BTN_ADD_WORD))
+    buttons.append(types.KeyboardButton(BTN_DEL_WORD))
+    buttons.append(types.KeyboardButton(BTN_VIEW_RATING))
     reply_keyboard.add_button(*buttons)
     return reply_keyboard.get_markup()
+
+
+def universal_buttons(text_buttons: list) -> object:
+    """
+    Создает клавиатуру с кнопками на основе переданного списка слов.
+
+    Функция генерирует клавиатуру с кнопками, используя слова, переданные в качестве аргумента.
+    Кнопки отображаются в случайном порядке.
+
+    :param text_buttons: list Список слов для отображения на кнопках.
+    :return: Клавиатура с кнопками для выбора.
+    """
+    reply_keyboard = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+    random.shuffle(text_buttons)
+    buttons = [types.KeyboardButton(word) for word in text_buttons]
+    reply_keyboard.add(*buttons)
+    return reply_keyboard
