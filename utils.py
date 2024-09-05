@@ -12,8 +12,8 @@ from config import config_logging
 from buttons import translation_buttons, start_button
 from btn_text import VIEW_RATING, ADD_WORD, DEL_WORD
 
-logger = logging.getLogger('utils')
 config_logging()
+logger = logging.getLogger('utils')
 
 
 class GameUtils:
@@ -77,10 +77,9 @@ class GameUtils:
             :param message: Сообщение от пользователя, содержащее его идентификатор.
         """
         chat_id = message.chat.id
-        word, correct_translation, text_buttons = self.word_generator(message)
+        word, correct_translation, text_buttons, id_word_db = self.word_generator(message)
 
         text_buttons.append(correct_translation)
-        id_word_db = self.db.search_word(word)
         markup = translation_buttons(text_buttons)
 
         self.bot.send_message(chat_id, f"Как перевести слово '<b>{word}</b>'?",
@@ -138,30 +137,52 @@ class GameUtils:
         user_id = message.from_user.id
         self.bot.send_message(chat_id,
                               'Введите слово и его перевод через запятую (например, "кот, cat"):')
-        self.bot.register_next_step_handler(message, self.save_new_word, user_id)
+        self.bot.register_next_step_handler(message, self._save_new_word, user_id)
 
-    def save_new_word(self, message, user_id):
+    def _save_new_word(self, message, user_id: int):
         """
-        Сохраняет новое слово и его перевод для конкретного пользователя в базе данных.
+            Сохраняет новое слово и его перевод для конкретного пользователя в базе данных.
 
-        :param message: Сообщение от пользователя с новым словом и его переводом.
-        :param user_id: Идентификатор пользователя в Telegram.
+            :param message: Сообщение от пользователя с новым словом и его переводом.
+            :param user_id: Идентификатор пользователя в Telegram.
         """
         chat_id = message.chat.id
-        text = message.text.split(',')
+        text = message.text.lower().split(',')
 
         if len(text) == 2:
             word = text[0].strip()
             translation = text[1].strip()
 
-            if not self.db.search_user_word(user_id, word):
-                self.db.save_user_word(user_id, word, translation)
-                self.bot.send_message(chat_id, f'Слово "{word}" с переводом "{translation}" было успешно добавлено.')
+            if not self.db.search_word(word, user_id):
+                self.db.save_word(word, translation, user_id)
+                self.bot.send_message(chat_id,
+                                      f'Слово "{word}" с переводом "{translation}" было успешно добавлено.')
+
+                word_message = self._format_user_words(user_id)
+                self.bot.send_message(chat_id, word_message, reply_markup=start_button())
 
             else:
-                self.bot.send_message(chat_id, f'Слово "{word}" уже существует в вашей базе данных.')
+                self.bot.send_message(chat_id,
+                                      f'Слово "{word}" уже существует в вашей базе данных.')
         else:
             self.bot.send_message(chat_id, 'Неверный формат. Попробуйте снова.')
+
+    def _format_user_words(self, user_id: int) -> str:
+        """
+        Форматирует список слов пользователя и их статус (изучается или изучено).
+
+        :param user_id: Идентификатор пользователя в базе данных.
+        :return: Строка с отформатированным списком слов.
+        """
+        word_dict = self.db.get_user_word(user_id)
+        word_list = []
+
+        for word, times_shown in word_dict.items():
+            status = "изучается" if times_shown is None or times_shown < 4 else "изучено"
+            word_list.append(f"{word} - {status}")
+
+        word_message = "Слова, которые вы добавили:\n" + "\n".join(word_list)
+        return word_message
 
     def word_generator(self, message):
         """
@@ -174,25 +195,29 @@ class GameUtils:
         :param message: Объект сообщения от пользователя в Telegram, используемый
                         для получения ID пользователя.
 
-        :return: Кортеж, содержащий выбранное слово, его правильный перевод и
-                 список неправильных вариантов перевода.
+        :return: Кортеж, содержащий выбранное слово, его правильный перевод, id из БД
+                    и список неправильных вариантов перевода.
         """
         id_user = message.from_user.id
         flag = random.randint(0, 2)
+        logger.debug(f'def word_generator:flag {flag}')
         if flag == 0:
             word_dict = self.read_words_csv(id_user)
 
         elif flag == 1:
-            word_dict = None
+            word_dict = self.read_words_bd_added_user(id_user)
 
         else:
             word_dict = self.read_words_bd(id_user)
 
+        logger.debug(f'def word_generator:word_dict {word_dict}')
+
         try:
             word = list(word_dict.keys())[0]
-            translation = word_dict[word]
-            text_buttons = list(word_dict.values())[1:]
-            return word, translation, text_buttons
+            translation = word_dict[word][0]
+            id_word = word_dict[word][1]
+            text_buttons = [item[0] for item in list(word_dict.values())[1:]]
+            return word, translation, text_buttons, id_word
 
         except Exception as e:
             logger.error(f'Ошибка при генерации слов: {e}')
@@ -200,8 +225,9 @@ class GameUtils:
             word_dict = self.get_fallback_words()
             word = list(word_dict.keys())[0]
             translation = word_dict[word]
+            id_word_db = self.db.search_word(word)
             text_buttons = list(word_dict.values())[1:]
-            return word, translation, text_buttons
+            return word, translation, text_buttons, id_word_db
 
     def read_words_csv(self, user_id: int, quantity: int = 4):
         """
@@ -216,6 +242,7 @@ class GameUtils:
             :return words_dict: dict Словарь, содержащий русские слова в качестве ключей
                                 и их английские переводы в качестве значений.
         """
+        logger.debug('запускается read_words_csv')
         words_dict = {}
         try:
             with open('russian_english_words.csv', newline='', encoding='utf-8') as csvfile:
@@ -226,14 +253,14 @@ class GameUtils:
                                            len(words[1:]) if len(words[1:]) < quantity else quantity)
 
             for word_list in selected_words:
-                check_word_bd = self.db.search_word(word_list[0])
-                if check_word_bd is None:
-                    self.db.save_word(word_list[0], word_list[1])
+                id_word = self.db.search_word(word_list[0])
+                if id_word is None:
+                    id_word = self.db.save_word(word_list[0], word_list[1])
 
-                words_dict[word_list[0]] = word_list[1]
+                words_dict[word_list[0]] = [word_list[1], id_word]
 
             if len(words_dict) < quantity:
-                result = self.db.get_random_words_for_user(user_id, quantity - len(words_dict))
+                result = self.read_words_bd(user_id, quantity - len(words_dict))
                 words_dict.update(result)
 
             remaining_words = [word for word in words if word not in selected_words]
@@ -246,10 +273,10 @@ class GameUtils:
 
         except Exception as e:
             logger.error(f'ошибка при чтении CSV файла {e}')
-            words_dict.update(self.read_words_bd(user_id))
+            words_dict.update(self.read_words_bd(user_id, quantity))
             return words_dict
 
-    def read_words_bd(self, user_id):
+    def read_words_bd(self, user_id, quantity: int = 4) -> dict:
         """
         Запрашивает слова с переводом из базы данных.
 
@@ -258,15 +285,39 @@ class GameUtils:
         оставшиеся слова выбираются из CSV-файла.
 
         :param user_id: ID пользователя в Telegram.
+        :param quantity: Необязательный параметр, определяющий требуемое количество слов
+                             для чтения (по умолчанию 4).
 
         :return: dict Словарь, содержащий русские слова в качестве ключей и их
                  английские переводы в качестве значений.
         """
-        result = self.db.get_random_words_for_user(user_id)
+        logger.debug('запускается read_words_bd')
+        result = self.db.get_random_words_for_user(user_id, quantity)
+
+        if len(result) < quantity:
+            csv_word = self.read_words_csv(user_id, quantity - len(result))
+            result.update(csv_word)
+        return result
+
+    def read_words_bd_added_user(self, user_id) -> dict:
+        """
+        Запрашивает слова с переводом из базы данных добавленные пользователем.
+
+        Эта функция запрашивает слова, которые добавил пользователь и еще не видел 4 раза,
+        из базы данных. Если найденных слов меньше необходимого количества,
+        оставшиеся слова выбираются из CSV-файла.
+
+        :param user_id: ID пользователя в Telegram.
+
+        :return: dict Словарь, содержащий русские слова в качестве ключей и их
+                 английские переводы в качестве значений.
+        """
+        logger.debug('запускается read_words_bd_added_user')
+        result = self.db.get_random_words_for_user(user_id, flag=True)
 
         if len(result) < 4:
-            csv_word = self.read_words_csv(user_id, 4 - len(result))
-            result.update(csv_word)
+            bd_word = self.read_words_bd(user_id, 4 - len(result))
+            result.update(bd_word)
         return result
 
     def display_player_rating(self, telegram_user_id):
@@ -343,7 +394,7 @@ class GameUtils:
             result = f'{idx}.'
         return result
 
-    def get_fallback_words(self):
+    def get_fallback_words(self, quantity: int = 4) -> dict:
         """
         Возвращает резервный набор слов из 20 русско-английских пар.
 
@@ -351,9 +402,13 @@ class GameUtils:
         в базе данных,
         и, если слово отсутствует, сохраняет его в базу данных.
 
+        :param quantity: Необязательный параметр, определяющий требуемое количество слов
+                             для чтения (по умолчанию 4).
+
         :return: dict Словарь, содержащий русские слова в качестве ключей и их английские
                  переводы в качестве значений.
         """
+        logger.debug('запуск резервного списка')
         fallback_words = {
             'кот': 'cat',
             'собака': 'dog',
@@ -376,7 +431,7 @@ class GameUtils:
             'рыба': 'fish',
             'птица': 'bird'
         }
-        selected_words = random.sample(list(fallback_words.items()), 4)
+        selected_words = random.sample(list(fallback_words.items()), quantity)
         words_dict = {}
 
         for word, translation in selected_words:
@@ -414,6 +469,7 @@ class DatabaseUtils(Database):
         table_name_word = 'word'
         columns_word = [
             ('id', 'SERIAL PRIMARY KEY'),
+            ('user_id', 'BIGINT DEFAULT NULL'),
             ('russian_words', 'VARCHAR(255)'),
             ('translation', 'VARCHAR(255)'),
 
@@ -427,18 +483,9 @@ class DatabaseUtils(Database):
             ('times_shown', 'INTEGER DEFAULT 0')
         ]
 
-        table_name_words_added_user = 'words_added_user'
-        columns_words_added_user = [
-            ('id', 'SERIAL PRIMARY KEY'),
-            ('user_id', 'BIGINT'),
-            ('word', 'TEXT'),
-            ('translation', 'TEXT')
-        ]
-
         self.create_table(table_name_user, columns_user)
         self.create_table(table_name_word, columns_word)
         self.create_table(table_name_user_word, columns_user_word)
-        self.create_table(table_name_words_added_user, columns_words_added_user)
 
     def save_user(self, name, tg_user_id):
         """
@@ -486,83 +533,115 @@ class DatabaseUtils(Database):
             user_info = None
         return user_info
 
-    def search_word(self, word):
+    def search_word(self, word: str, user_id: int = None):
         """
         Ищет слово в базе данных.
 
         Функция выполняет запрос в таблицу `word`, чтобы найти слово по его русскому написанию.
+        Если передан параметр `user_id`, функция будет искать слова,
+            добавленные конкретным пользователем.
         Если слово найдено, возвращает его ID. В противном случае возвращает `None`.
 
         :param word: str Слово на русском языке, которое нужно найти.
+        :param user_id: int Не обязательный параметр id пользователя в телеграмме.
+                        По умолчанию None.
 
         :return: int Идентификатор слова в базе данных или `None`, если слово не найдено.
         """
         table_name = 'word'
-        condition = 'russian_words = %s'
+        condition = 'russian_words = %s '
+        values = (word,)
+
+        if user_id is not None:
+            condition += 'AND user_id = %s'
+            values = (word, user_id)
+        else:
+            condition += 'AND user_id IS NULL'
 
         result = self.select_data(table_name, 'id',
-                                  condition=condition, values=(word,))
+                                  condition=condition, values=values)
         if result:
             answer = result[0][0]
         else:
             answer = None
         return answer
 
-    def save_word(self, word, translation):
+    def save_word(self, word: str, translation: str, user_id: int = None):
         """
         Сохраняет слово и его перевод в базе данных.
 
-        Функция сохраняет русское слово и его английский перевод в таблицу `word` базы данных.
+        Функция сохраняет переданные параметры `word` (русское слово) и
+        `translation` (английский перевод) в таблицу `word` базы данных.
+        Если передан необязательный параметр `user_id` (id пользователя в Telegram),
+        он также будет сохранен для данной записи.
 
         :param word: str Слово на русском языке.
         :param translation: str Перевод слова на английский язык.
+        :param user_id: int Не обязательный параметр id пользователя в телеграмме.
+                        По умолчанию None.
         """
         data = {
             'russian_words': word,
             'translation': translation
         }
+        if user_id is not None:
+            data['user_id'] = user_id
+
         table_name = 'word'
-        self.insert_data(table_name, data)
+        result = self.insert_data(table_name, data)
+        return result
 
-    def get_random_words_for_user(self, user_id: int, quantity: int = 4):
+    def get_random_words_for_user(self, user_id: int, quantity: int = 4,
+                                  flag: bool = False) -> dict:
         """
-            Извлекает случайные слова для указанного пользователя, которые были показаны менее
-            4 раз, и возвращает их в виде словаря.
+        Получает случайные слова для пользователя, которые показывались ему менее 4 раз,
+            и возвращает их в виде словаря.
 
-            Функция выбирает слова, которые еще не были показаны пользователю 4 и более раз,
-            и ограничивает выбор указанным количеством (по умолчанию 4).
-            Результаты выбираются случайным образом и возвращаются в виде словаря,
-            где ключами являются слова на русском языке, а значениями их переводы на английский.
+        Функция извлекает из базы данных слова, которые пользователю еще
+            не показывались 4 и более раз.
+        Количество выбираемых слов можно задать через параметр `quantity` (по умолчанию 4).
+        Если `flag` установлен в `True`, выбираются только слова, добавленные самим пользователем.
+        Если `flag` равен `False`, выбираются слова из общего списка.
 
-            :param user_id: int Идентификатор пользователя в базе данных.
-            :param quantity: int Количество случайных слов для выбора (по умолчанию 4).
+        Результат возвращается в виде словаря, где ключами являются русские слова,
+            а значениями — список из перевода на английский язык и id слов в БД.
 
-            :return: dict Словарь с выбранными словами, где ключами являются русские слова,
-                   а значениями их переводы на английский.
+        :param user_id: int Идентификатор пользователя в базе данных.
+        :param quantity: int Количество случайных слов для выбора (по умолчанию 4).
+        :param flag: bool Указывает, выбирать ли слова, добавленные самим пользователем (`True`),
+                     или из общего списка (`False`).
+
+        :return: dict Словарь с выбранными словами, где ключами являются русские слова,
+                     а значениями — список из перевода на английский язык и id слов в БД.
         """
+        user_condition = f'AND w.user_id = {user_id}' if flag else 'AND w.user_id IS NULL'
 
         words_dict = {}
         table_name = 'word w'
-        columns = 'w.russian_words, w.translation'
+        columns = 'w.russian_words, w.translation, w.id'
         condition = f"""
             w.id NOT IN (
                 SELECT uw.word_id
                 FROM users_word uw
-                WHERE uw.user_id = {user_id}
+                WHERE uw.user_id = (
+                        SELECT u.id
+                        FROM users u
+                        WHERE u.telegram_user_id = {user_id}
+                    
+                        )
                 GROUP BY uw.word_id
                 HAVING SUM(uw.times_shown) >= 4
             )
+            {user_condition}
             ORDER BY RANDOM()
             LIMIT {quantity};        
         """
-
         result_bd_word = self.select_data(table_name=table_name,
                                           columns=columns,
                                           condition=condition
                                           )
         for words in result_bd_word:
-            words_dict[words[0]] = words[1]
-
+            words_dict[words[0]] = [words[1], words[2]]
         return words_dict
 
     def update_points(self, user_id, points: int, add=True):
@@ -635,8 +714,35 @@ class DatabaseUtils(Database):
         columns = 'telegram_user_id, name, points'
 
         result = self.select_data(table_name=table_name, columns=columns)
-        rating_list = [{'telegram_user_id': row[0], 'name': row[1], 'points': row[2]} for row in result]
+        rating_list = [{'telegram_user_id': row[0], 'name': row[1],
+                        'points': row[2]} for row in result]
         return rating_list
+
+    def get_user_word(self, user_id: int) -> dict:
+        """
+        Извлекает список слов, добавленных пользователем в базу данных.
+
+        Эта функция запрашивает слова, которые были добавлены указанным пользователем
+        в базу данных, и возвращает их в виде списка.
+
+        :param user_id: Идентификатор пользователя в Telegram.
+
+        :return dict: Словарь слов на русском языке и количество повторений
+                    добавленных пользователем в базу данных.
+        """
+        words = {}
+        table_name = 'word w LEFT JOIN users_word uw ON w.id = uw.word_id'
+        columns = 'w.russian_words, uw.times_shown'
+        condition = 'w.user_id = %s'
+        values = (user_id,)
+
+        result = self.select_data(table_name=table_name, columns=columns,
+                                  condition=condition, values=values)
+
+        for word in result:
+            words[word[0]] = word[1]
+
+        return words
 
 
 if __name__ == '__main__':

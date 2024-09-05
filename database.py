@@ -94,6 +94,7 @@ class Database:
             self.cur.execute(query, list(values))
             inserted_id = self.cur.fetchone()[0]
             self.conn.commit()
+            logger.info(f'Данные {data} в таблицу {table_name} успешно добавлены')
             return inserted_id
         except psycopg2.DatabaseError as e:
             logger.error(f"Ошибка при вставке данных в таблицу {table_name}: {e}")
